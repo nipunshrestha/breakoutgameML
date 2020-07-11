@@ -120,7 +120,12 @@ def main(genomes, config):
         keys = pygame.key.get_pressed()
         for x, paddle in enumerate(paddles):
             ge[x].fitness += 0.1
-            output = nets[x].activate(())
+            output = nets[x].activate((paddle.rect.x, abs(paddle.rect.x - ball.rect.x), abs(paddle.rect.y - ball.rect.y)))
+            if output[0] > 0.5:
+                if ball.direction_x > 0:
+                    paddle.move_right()
+                else:
+                    paddle.move_left()
 
         if keys[pygame.K_ESCAPE]:
             done = True
@@ -132,6 +137,7 @@ def main(genomes, config):
         for x, paddle in enumerate(paddles):
             if pygame.sprite.collide_mask(ball, paddle):
                 ge[x].fitness += 1
+                ball.flip_direction_y()
 
         collided_bricks = pygame.sprite.groupcollide(
             brick_list, ball_list, True, False, pygame.sprite.collide_mask)
@@ -149,7 +155,7 @@ def main(genomes, config):
         ball.move()
         if ball.leaves_screen_bottom():
             for x, paddle in enumerate(paddles):
-                ge[x].fitness -= 1
+                ge[x].fitness -= len(brick_list)
                 paddles.pop(x)
                 nets.pop(x)
                 ge.pop(x)
