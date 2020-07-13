@@ -1,6 +1,7 @@
 import os
 import pygame
 import neat
+import time
 
 os.environ['SDL_VIDEO_WINDOW_POS'] = "200,30"
 
@@ -24,8 +25,10 @@ class Brick(pygame.sprite.Sprite):
 
 
 class Paddle(pygame.sprite.Sprite):
+
     def __init__(self, x, y):
         pygame.sprite.Sprite.__init__(self)
+        self.hit = False
         self.image = pygame.Surface((80, 10))
         self.image.fill(WHITE)
         self.rect = self.image.get_rect()
@@ -37,6 +40,9 @@ class Paddle(pygame.sprite.Sprite):
 
     def move_right(self):
         self.rect.x += 20
+
+    def hitball(self):
+        self.hit = True
 
 
 class Ball(pygame.sprite.Sprite):
@@ -71,7 +77,7 @@ class Ball(pygame.sprite.Sprite):
         self.rect.y += self.BALL_SPEED * self.direciton_y
 
 
-def main(genomes, config):
+def eval_genomes(genomes, config):
     pygame.init()
     pygame.font.init()
     game_font = pygame.font.SysFont('', 30)
@@ -114,30 +120,41 @@ def main(genomes, config):
     score_surface = None
 
     done = False
-    while not done:
-        screen.fill(GRAY)
 
-        keys = pygame.key.get_pressed()
+    while not done and  ball.rect.y < 600:
+
+        screen.fill(GRAY)
+        clock.tick(60)
+
         for x, paddle in enumerate(paddles):
             ge[x].fitness += 0.1
             output = nets[x].activate((paddle.rect.x, abs(paddle.rect.x - ball.rect.x), abs(paddle.rect.y - ball.rect.y)))
             if output[0] > 0.5:
-                if ball.direction_x > 0:
-                    paddle.move_right()
-                else:
-                    paddle.move_left()
-
-        if keys[pygame.K_ESCAPE]:
-            done = True
+                if ball.direciton_y > 0:
+                    if ball.direction_x > 0:
+                        paddle.move_right()
+                    else:
+                        paddle.move_left()
 
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 done = True
+                pygame.quit()
+                quit()
+                break
 
         for x, paddle in enumerate(paddles):
-            if pygame.sprite.collide_mask(ball, paddle):
-                ge[x].fitness += 1
+            if pygame.sprite.collide_mask(ball, paddles[x]):
+                ge[x].fitness += 5
                 ball.flip_direction_y()
+                if not paddle.hit:
+                    paddles[x].hit = True
+
+        for x, paddle in enumerate(paddles):
+            if not paddles[x].hit:
+                nets.pop(x)
+                ge.pop(x)
+                paddles.pop(x)
 
         collided_bricks = pygame.sprite.groupcollide(
             brick_list, ball_list, True, False, pygame.sprite.collide_mask)
@@ -146,7 +163,7 @@ def main(genomes, config):
             ball.flip_direction_y()
             score += len(collided_bricks)
             for g in ge:
-                g.fitness += 1
+                g.fitness += len(collided_bricks)
 
         if score_surface is None or collided_bricks:
             score_surface = game_font.render(
@@ -156,15 +173,21 @@ def main(genomes, config):
         if ball.leaves_screen_bottom():
             for x, paddle in enumerate(paddles):
                 ge[x].fitness -= len(brick_list)
-                paddles.pop(x)
                 nets.pop(x)
                 ge.pop(x)
+                paddles.pop(x)
+
+        for x,paddle in enumerate(paddles):
+            if paddle.rect.x + 70 >= 800 or paddle.rect.x < 0:
+                nets.pop(x)
+                ge.pop(x)
+                paddles.pop(x)
 
         all_sprites.update()
         all_sprites.draw(screen)
+
         screen.blit(score_surface, (50, 240))
         pygame.display.update()
-        clock.tick(60)
 
 
 def run(config_file):
@@ -174,7 +197,7 @@ def run(config_file):
     stats = neat.StatisticsReporter()
     p.add_reporter(stats)
 
-    winner = p.run(main, 50)
+    winner = p.run(eval_genomes, 50)
     print('\nBest genome:\n{!s}'.format(winner))
 
 
