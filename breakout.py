@@ -1,7 +1,7 @@
 import os
 import pygame
 import neat
-import time
+import math
 
 os.environ['SDL_VIDEO_WINDOW_POS'] = "200,30"
 
@@ -12,12 +12,23 @@ BLACK = (0, 0, 0)
 WHITE = (255, 255, 255)
 GREEN = (0, 255, 0)
 GRAY = (100, 100, 100)
+gen = 0
+
+
+class Util():
+    def intersects(self, a, b, c, min, max):
+        disc = b ** 2 - 4 * a * c
+        if disc < 0:
+            return False
+        s1 = (-b + math.sqrt(disc)) / (2 * a)
+        s2 = (-b - math.sqrt(disc)) / (2 * a)
+        return (min <= s1 <= max) or (min <= s2 <= max)
 
 
 class Brick(pygame.sprite.Sprite):
     def __init__(self, x, y):
         pygame.sprite.Sprite.__init__(self)
-        self.image = pygame.Surface((50, 20))
+        self.image = pygame.Surface((60, 10))
         self.image.fill(WHITE)
         self.rect = self.image.get_rect()
         self.rect.x = x
@@ -25,6 +36,8 @@ class Brick(pygame.sprite.Sprite):
 
 
 class Paddle(pygame.sprite.Sprite):
+    WIDTH = 40
+    HEIGHT = 5
 
     def __init__(self, x, y):
         pygame.sprite.Sprite.__init__(self)
@@ -34,15 +47,29 @@ class Paddle(pygame.sprite.Sprite):
         self.rect = self.image.get_rect()
         self.rect.x = x
         self.rect.y = y
+        self.util = Util()
 
     def move_left(self):
-        self.rect.x -= 20
+        self.rect.x -= 8
 
     def move_right(self):
-        self.rect.x += 20
+        self.rect.x += 8
 
-    def hitball(self):
-        self.hit = True
+    def collides_ball(self, ball):
+        intersects_x = False
+        intersects_y = False
+
+        intersects_x = intersects_x or self.util.intersects(
+            1, -2 * ball.rect.x, (ball.rect.y - self.rect.y) ** 2 - 10 ** 2 + ball.rect.x ** 2, self.rect.x,
+            self.rect.x + self.WIDTH)
+        intersects_y = intersects_y or self.util.intersects(
+            1, -2 * ball.rect.y, (ball.rect.x - self.rect.x) ** 2 - 10 ** 2 + ball.rect.y ** 2, self.rect.y,
+            self.rect.y + self.HEIGHT)
+        intersects_y = intersects_y or self.util.intersects(
+            1, -2 * ball.rect.y, (ball.rect.x - self.rect.x - self.WIDTH) ** 2 - 10 ** 2 + ball.rect.y ** 2, self.rect.y,
+            self.rect.y + self.HEIGHT)
+
+        return intersects_x, intersects_y
 
 
 class Ball(pygame.sprite.Sprite):
@@ -52,8 +79,8 @@ class Ball(pygame.sprite.Sprite):
         pygame.sprite.Sprite.__init__(self)
         self.direction_x = 1
         self.direciton_y = 1
-        self.image = pygame.Surface((10, 10))
-        self.image.fill(WHITE)
+        self.image = pygame.Surface([10, 10])
+        self.image.fill(GREEN)
         self.rect = self.image.get_rect()
         self.rect.x = x
         self.rect.y = y
@@ -110,18 +137,22 @@ def eval_genomes(genomes, config):
     ball_list.add(ball)
     all_sprites.add(ball)
 
-    for i in range(0, 10):
-        for j in range(0, 3):
-            brick = Brick(70 + i * 70, 20 + j * 50)
+    for i in range(0, 11):
+        for j in range(0, 7):
+            brick = Brick(20 + i * 70, 15 + j * 20)
             brick_list.add(brick)
             all_sprites.add(brick)
 
+    global gen
+    gen += 1
     score = 0
     score_surface = None
+    alive_surface = None
+    gen_surface = None
 
     done = False
 
-    while not done and  ball.rect.y < 600:
+    while not done and len(paddles)>0:
 
         screen.fill(GRAY)
         clock.tick(60)
@@ -131,6 +162,8 @@ def eval_genomes(genomes, config):
             output = nets[x].activate((paddle.rect.x, abs(paddle.rect.x - ball.rect.x), abs(paddle.rect.y - ball.rect.y)))
             if output[0] > 0.5:
                 if ball.direciton_y > 0:
+                    if ball.rect.y + 10 == paddle.rect.y:
+                        continue
                     if ball.direction_x > 0:
                         paddle.move_right()
                     else:
@@ -144,17 +177,18 @@ def eval_genomes(genomes, config):
                 break
 
         for x, paddle in enumerate(paddles):
-            if pygame.sprite.collide_mask(ball, paddles[x]):
+            paddle_ball_intersects_x, paddle_ball_intersects_y = paddle.collides_ball(ball)
+            if paddle_ball_intersects_y:
                 ge[x].fitness += 5
                 ball.flip_direction_y()
-                if not paddle.hit:
-                    paddles[x].hit = True
 
-        for x, paddle in enumerate(paddles):
-            if not paddles[x].hit:
+            if ball.rect.y + 5 >= paddle.rect.y and not paddle_ball_intersects_y:
+                ge[x].fitness -= 5
                 nets.pop(x)
                 ge.pop(x)
                 paddles.pop(x)
+                paddle_list.remove(paddle)
+                all_sprites.remove(paddle)
 
         collided_bricks = pygame.sprite.groupcollide(
             brick_list, ball_list, True, False, pygame.sprite.collide_mask)
@@ -163,11 +197,16 @@ def eval_genomes(genomes, config):
             ball.flip_direction_y()
             score += len(collided_bricks)
             for g in ge:
-                g.fitness += len(collided_bricks)
+                g.fitness += 1
 
         if score_surface is None or collided_bricks:
-            score_surface = game_font.render(
-                'Score: %d' % (score), False, GREEN)
+            score_surface = game_font.render('Score: %d' % score, False, GREEN)
+
+        if alive_surface is None or len(paddles) > 0:
+            alive_surface=game_font.render('Alive: %d' % len(paddles), False, GREEN)
+
+        if gen_surface is None or gen >= 0:
+            gen_surface = game_font.render('Generation: %d' % gen, False, GREEN)
 
         ball.move()
         if ball.leaves_screen_bottom():
@@ -176,17 +215,24 @@ def eval_genomes(genomes, config):
                 nets.pop(x)
                 ge.pop(x)
                 paddles.pop(x)
+                paddle_list.remove(paddle)
+                all_sprites.remove(paddle)
 
-        for x,paddle in enumerate(paddles):
-            if paddle.rect.x + 70 >= 800 or paddle.rect.x < 0:
+        for x, paddle in enumerate(paddles):
+            if paddle.rect.x + 80 > 810 or paddle.rect.x < 0:
+                ge[x].fitness -= 5
                 nets.pop(x)
                 ge.pop(x)
                 paddles.pop(x)
+                all_sprites.remove(paddle)
+                paddle_list.remove(paddle)
 
         all_sprites.update()
         all_sprites.draw(screen)
 
         screen.blit(score_surface, (50, 240))
+        screen.blit(alive_surface, (50, 270))
+        screen.blit(gen_surface, (50, 300))
         pygame.display.update()
 
 
