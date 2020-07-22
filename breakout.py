@@ -2,6 +2,7 @@ import os
 import pygame
 import neat
 import math
+import pickle
 
 os.environ['SDL_VIDEO_WINDOW_POS'] = "200,30"
 
@@ -15,16 +16,6 @@ GRAY = (100, 100, 100)
 gen = 0
 
 
-class Util():
-    def intersects(self, a, b, c, min, max):
-        disc = b ** 2 - 4 * a * c
-        if disc < 0:
-            return False
-        s1 = (-b + math.sqrt(disc)) / (2 * a)
-        s2 = (-b - math.sqrt(disc)) / (2 * a)
-        return (min <= s1 <= max) or (min <= s2 <= max)
-
-
 class Brick(pygame.sprite.Sprite):
     def __init__(self, x, y):
         pygame.sprite.Sprite.__init__(self)
@@ -36,18 +27,18 @@ class Brick(pygame.sprite.Sprite):
 
 
 class Paddle(pygame.sprite.Sprite):
-    WIDTH = 40
-    HEIGHT = 5
+    WIDTH = 80
+    HEIGHT = 10
 
     def __init__(self, x, y):
         pygame.sprite.Sprite.__init__(self)
         self.hit = False
-        self.image = pygame.Surface((80, 10))
+        self.image = pygame.Surface((self.WIDTH, self.HEIGHT))
         self.image.fill(WHITE)
         self.rect = self.image.get_rect()
         self.rect.x = x
         self.rect.y = y
-        self.util = Util()
+        # self.util = Util()
 
     def move_left(self):
         self.rect.x -= 8
@@ -55,25 +46,9 @@ class Paddle(pygame.sprite.Sprite):
     def move_right(self):
         self.rect.x += 8
 
-    def collides_ball(self, ball):
-        intersects_x = False
-        intersects_y = False
-
-        intersects_x = intersects_x or self.util.intersects(
-            1, -2 * ball.rect.x, (ball.rect.y - self.rect.y) ** 2 - 10 ** 2 + ball.rect.x ** 2, self.rect.x,
-            self.rect.x + self.WIDTH)
-        intersects_y = intersects_y or self.util.intersects(
-            1, -2 * ball.rect.y, (ball.rect.x - self.rect.x) ** 2 - 10 ** 2 + ball.rect.y ** 2, self.rect.y,
-            self.rect.y + self.HEIGHT)
-        intersects_y = intersects_y or self.util.intersects(
-            1, -2 * ball.rect.y, (ball.rect.x - self.rect.x - self.WIDTH) ** 2 - 10 ** 2 + ball.rect.y ** 2, self.rect.y,
-            self.rect.y + self.HEIGHT)
-
-        return intersects_x, intersects_y
-
 
 class Ball(pygame.sprite.Sprite):
-    BALL_SPEED = 5
+    BALL_SPEED = 4
 
     def __init__(self, x, y):
         pygame.sprite.Sprite.__init__(self)
@@ -92,7 +67,7 @@ class Ball(pygame.sprite.Sprite):
         self.direciton_y *= -1
 
     def leaves_screen_bottom(self):
-        if self.rect.x < 0 or self.rect.x > SCREEN_WIDTH:
+        if self.rect.x < 0 or self.rect.x + 10 > SCREEN_WIDTH:
             self.flip_direction_x()
         if self.rect.y < 0:
             self.flip_direction_y()
@@ -119,11 +94,11 @@ def eval_genomes(genomes, config):
     for _, g in genomes:
         net = neat.nn.FeedForwardNetwork.create(g, config)
         nets.append(net)
-        paddles.append(Paddle(100, 550))
+        paddles.append(Paddle(100, SCREEN_HEIGHT-30))
         g.fitness = 0
         ge.append(g)
 
-    ball = Ball(250, 250)
+    ball = Ball(150, 150)
 
     brick_list = pygame.sprite.Group()
     paddle_list = pygame.sprite.Group()
@@ -159,12 +134,13 @@ def eval_genomes(genomes, config):
 
         for x, paddle in enumerate(paddles):
             ge[x].fitness += 0.1
-            output = nets[x].activate((paddle.rect.x, abs(paddle.rect.x - ball.rect.x), abs(paddle.rect.y - ball.rect.y)))
+            output = nets[x].activate(((paddle.rect.x + (paddle.WIDTH/2)), abs((paddle.rect.x + (paddle.WIDTH/2)) - ball.rect.x),
+                                       abs(paddle.rect.y - ball.rect.y)))
             if output[0] > 0.5:
                 if ball.direciton_y > 0:
-                    if ball.rect.y + 10 == paddle.rect.y:
+                    if ball.rect.y == paddle.rect.y and (paddle.rect.x <= ball.rect.x <= paddle.rect.x + paddle.WIDTH):
                         continue
-                    if ball.direction_x > 0:
+                    if paddle.rect.x < ball.rect.x:
                         paddle.move_right()
                     else:
                         paddle.move_left()
@@ -177,13 +153,14 @@ def eval_genomes(genomes, config):
                 break
 
         for x, paddle in enumerate(paddles):
-            paddle_ball_intersects_x, paddle_ball_intersects_y = paddle.collides_ball(ball)
-            if paddle_ball_intersects_y:
-                ge[x].fitness += 5
+            # paddle_ball_intersects_x, paddle_ball_intersects_y = paddles[x].collides_ball(ball)
+            if (paddle.rect.x <= ball.rect.x < paddle.rect.x + paddle.WIDTH) and ball.rect.y + 10 >= paddle.rect.y:
+                ge[x].fitness += 1
                 ball.flip_direction_y()
 
-            if ball.rect.y + 5 >= paddle.rect.y and not paddle_ball_intersects_y:
-                ge[x].fitness -= 5
+            if ball.rect.y + 10 > paddle.rect.y and not(paddle.rect.x <= ball.rect.x < paddle.rect.x + paddle.WIDTH) and\
+                    not pygame.sprite.collide_mask(paddle,ball):
+                ge[x].fitness -= 3
                 nets.pop(x)
                 ge.pop(x)
                 paddles.pop(x)
@@ -203,7 +180,7 @@ def eval_genomes(genomes, config):
             score_surface = game_font.render('Score: %d' % score, False, GREEN)
 
         if alive_surface is None or len(paddles) > 0:
-            alive_surface=game_font.render('Alive: %d' % len(paddles), False, GREEN)
+            alive_surface = game_font.render('Alive: %d' % len(paddles), False, GREEN)
 
         if gen_surface is None or gen >= 0:
             gen_surface = game_font.render('Generation: %d' % gen, False, GREEN)
@@ -219,7 +196,7 @@ def eval_genomes(genomes, config):
                 all_sprites.remove(paddle)
 
         for x, paddle in enumerate(paddles):
-            if paddle.rect.x + 80 > 810 or paddle.rect.x < 0:
+            if paddle.rect.x + paddle.WIDTH > SCREEN_WIDTH or paddle.rect.x < 0:
                 ge[x].fitness -= 5
                 nets.pop(x)
                 ge.pop(x)
@@ -235,6 +212,12 @@ def eval_genomes(genomes, config):
         screen.blit(gen_surface, (50, 300))
         pygame.display.update()
 
+        if score >= 77:
+            pickle.dump(nets[0], open("best.pickle", "wb"))
+            pygame.quit()
+            quit()
+            break
+
 
 def run(config_file):
     config = neat.config.Config(neat.DefaultGenome, neat.DefaultReproduction, neat.DefaultSpeciesSet, neat.DefaultStagnation, config_file)
@@ -243,7 +226,7 @@ def run(config_file):
     stats = neat.StatisticsReporter()
     p.add_reporter(stats)
 
-    winner = p.run(eval_genomes, 50)
+    winner = p.run(eval_genomes, 1000)
     print('\nBest genome:\n{!s}'.format(winner))
 
 
